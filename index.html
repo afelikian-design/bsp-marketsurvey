@@ -138,8 +138,13 @@ select{background:var(--paper);border:1px solid var(--rule);padding:3px 7px;font
 .pin-sub:hover{transform:scale(1.15)}
 
 /* colour identity chip, shared by both tables */
-.chip{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:8px;
+.chip{display:inline-block;width:9px;height:9px;border-radius:2px;
   vertical-align:baseline;box-shadow:0 0 0 1px rgba(14,36,57,.14)}
+.chipbtn{border:0;background:transparent;padding:2px 8px 2px 0;cursor:pointer;line-height:1;vertical-align:baseline}
+.chipbtn:hover .chip{box-shadow:0 0 0 2px var(--navy)}
+tr.off .chip{background:transparent!important;box-shadow:inset 0 0 0 1.5px var(--rule)}
+tr.off td{opacity:.45}
+tr.off .pname{text-decoration:line-through;text-decoration-color:var(--rule)}
 tr.subj .chip{border-radius:0;clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);
   width:11px;height:11px;box-shadow:none;margin-right:6px}
 #tbl tbody tr:hover td,#specTbl tbody tr:hover td{background:#EEF3F8}
@@ -404,10 +409,13 @@ const S = {           // UI state
 
 /* ---------- load embedded payload ---------- */
 function loadPayload(p){
-  DB.props = p.props; DB.fps = p.fps; DB.meta = p.meta; DB.subject = p.subject;
+  const clean = v => v==null ? '' : String(v).replace(/\s+/g,' ').trim();
+  DB.props = p.props.map(clean); DB.fps = p.fps.map(x=>clean(x)||'—');
+  DB.meta = {}; for(const k in p.meta) DB.meta[clean(k)] = p.meta[k];
+  DB.subject = clean(p.subject);
   DB.asof = p.asof; DB.market = p.market||''; DB.src = p.src||'';
   DB.units = p.rows.map(r=>({
-    prop:p.props[r[0]], fp:p.fps[r[1]], unit:r[2], beds:r[3], baths:r[4], sqft:r[5],
+    prop:DB.props[r[0]], fp:DB.fps[r[1]], unit:clean(r[2]), beds:r[3], baths:r[4], sqft:r[5],
     status: typeof r[6]==='number' ? STATUS[r[6]] : r[6],
     dfa:r[7], lsd:r[8], dom:r[9], listed:r[10], ask:r[11], eff:r[12], conc:r[13]
   }));
@@ -437,6 +445,11 @@ function mdy(v){
   if(!m) return null;
   return Math.round((Date.UTC(+m[3],+m[1]-1,+m[2])-EPOCH)/864e5);
 }
+/* AIQ text cells arrive newline-wrapped and space-padded, so "Amethyst" and
+   "\nAmethyst      " read as two different floor plans and duplicate every
+   dropdown entry. Collapse all whitespace before anything keys off these. */
+const txt = v => v==null ? '' : String(v).replace(/\s+/g,' ').trim();
+
 function findSheet(wb, want){
   const k = wb.SheetNames.find(n=>n.toLowerCase().trim()===want.toLowerCase());
   return k ? wb.Sheets[k] : null;
@@ -450,9 +463,9 @@ function parseWorkbook(wb){
   const col = (r,...names)=>{ for(const n of names){ for(const k in r){ if(k.replace(/\s+/g,' ').trim().toLowerCase()===n) return r[k]; } } return null; };
   const units=[];
   for(const r of recs){
-    const prop = col(r,'property'); if(!prop) continue;
+    const prop = txt(col(r,'property')); if(!prop) continue;
     units.push({
-      prop:String(prop).trim(), fp:String(col(r,'floor plan')??'—').trim(), unit:String(col(r,'unit number')??'').trim(),
+      prop:txt(prop), fp:txt(col(r,'floor plan'))||'—', unit:txt(col(r,'unit number')),
       beds:num(col(r,'bed count')), baths:num(col(r,'bath count')), sqft:num(col(r,'sq ft')),
       status:String(col(r,'unit status')??'').trim(),
       dfa:mdy(col(r,'date first available')), lsd:mdy(col(r,'leased date')),
@@ -469,10 +482,10 @@ function parseWorkbook(wb){
   const vms = findSheet(wb,'Visual Market Survey');
   if(vms){
     for(const r of XLSX.utils.sheet_to_json(vms,{range:6,defval:null})){
-      const n = r['Property Name']; if(!n || String(n).trim()==='Average') break;
+      const n = txt(r['Property Name']); if(!n || n==='Average') break;
       const d = num(r['Distance']);
-      if(d===0) subject=String(n).trim();
-      meta[String(n).trim()]={ dist:d, yr:num(r['Year Built']), tot:num(r['Total Units']),
+      if(d===0) subject=n;
+      meta[n]={ dist:d, yr:num(r['Year Built']), tot:num(r['Total Units']),
         exp:num(r['Exposure %']), lsd:num(r['Leased %']), pre:num(r['Pre-Leased %']),
         conc:num(r['Concession %']), a7:num(r['Applications Last 7 Days']),
         a30:num(r['Applications Last 30 Days']), av:num(r['Total Avail. Units']), vac:num(r['Vacant Units']) };
@@ -495,8 +508,8 @@ function parseWorkbook(wb){
   // street address per property (city/state are not in the export — user-supplied)
   const addrOf={};
   for(const r of recs){
-    const p=col(r,'property'), a=col(r,'address');
-    if(p && a && !addrOf[String(p).trim()]) addrOf[String(p).trim()]=String(a).trim();
+    const p=txt(col(r,'property')), a=txt(col(r,'address'));
+    if(p && a && !addrOf[p]) addrOf[p]=a;
   }
   for(const p in addrOf){ meta[p]=meta[p]||{}; if(!meta[p].addr) meta[p].addr=addrOf[p]; }
 
@@ -521,10 +534,11 @@ function asofDay(){ return Math.round((Date.parse(DB.asof+'T00:00:00Z')-EPOCH)/8
    its own date field. "On market" is a point-in-time state — a unit listed 200
    days ago is still available today — so the window does NOT narrow it. Use
    "Newly listed" when you want inventory that came to market inside the window. */
-function activeUnits(){
+function activeUnits(opts){
+  const allProps = !!(opts && opts.allProps);   // the comp table lists excluded rows too
   const cut = S.win==='all' ? -Infinity : asofDay()-S.win;
   return DB.units.filter(u=>{
-    if(!S.props.has(u.prop)) return false;
+    if(!allProps && !S.props.has(u.prop)) return false;
     const leased = u.status==='Leased';
     switch(S.status){
       case 'avail':  if(leased) return false; break;
@@ -533,7 +547,11 @@ function activeUnits(){
       case 'all':    if(leased && (u.lsd==null || u.lsd<cut)) return false; break;
     }
     if(S.beds!=='all' && String(u.beds)!==S.beds) return false;
-    if(S.mode==='floorplan' && S.fp!=='all' && !(u.prop===DB.subject && u.fp===S.fp)) return false;
+    // floor-plan view is a view OF the subject; comps have their own plan names
+    if(S.mode==='floorplan'){
+      if(u.prop!==DB.subject) return false;
+      if(S.fp!=='all' && u.fp!==S.fp) return false;
+    }
     return true;
   });
 }
@@ -926,24 +944,34 @@ function renderTable(units,st){
     return;
   }
   $('#tblTitle').textContent='Competitive set';
-  A.textContent='Row for units · name to exclude';
+  A.textContent='Row opens units · colour chip includes or excludes';
+  /* Listed from the unfiltered set: an excluded property has no units in `st`,
+     so it used to vanish from the table with no way to switch it back on. */
+  const stAll = propStats(activeUnits({allProps:true}));
   T.innerHTML=`<thead><tr><th>Property</th><th>Mi</th><th>Built</th><th>Units</th><th>Listed</th><th>Ask</th>
     <th>Eff.</th><th>PSF</th><th>Conc.</th><th>Expo.</th><th>Days</th></tr></thead><tbody>`+
-    Object.entries(st).sort((a,b)=>
+    Object.entries(stAll).sort((a,b)=>
       (a[0]===DB.subject?-1:b[0]===DB.subject?1:0) || (b[1].epsf-a[1].epsf)).map(([p,v])=>
     `<tr class="clik ${p===DB.subject?'subj':''} ${S.props.has(p)?'':'off'}" data-p="${p}">
-      <td>${chip(p)}<span class="pname">${p}</span><span class="chev">›</span></td><td>${F.mi(v.dist)}</td><td>${v.yr||'—'}</td>
+      <td><button class="chipbtn" data-toggle="${encodeURIComponent(p)}" title="${S.props.has(p)?'Exclude from the analysis':'Include in the analysis'}" aria-pressed="${S.props.has(p)}">${chip(p)}</button><span class="pname">${p}</span><span class="chev">›</span></td>
+      <td>${F.mi(v.dist)}</td><td>${v.yr||'—'}</td>
       <td>${v.tot||'—'}</td><td>${v.n}</td><td>${F.$(v.ask)}</td><td>${F.$(v.eff)}</td><td>${F.psf(v.epsf)}</td>
       <td>${F.pct(v.conc)}</td><td>${F.pct(v.exp)}</td><td>${F.d(v.dom)}</td></tr>`).join('')+'</tbody>';
   T.querySelectorAll('tbody tr.clik').forEach(tr=>{
     tr.onmouseenter=()=>setFocus(tr.dataset.p);
     tr.onmouseleave=()=>setFocus(null);
   });
+  T.querySelectorAll('[data-toggle]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const p=decodeURIComponent(b.dataset.toggle);
+    S.props.has(p) ? S.props.delete(p) : S.props.add(p);
+    if(!S.props.size) DB.props.forEach(x=>S.props.add(x));   // never empty the analysis
+    render();
+  });
   T.querySelectorAll('tbody tr.clik').forEach(tr=>tr.onclick=e=>{
-    const p=tr.dataset.p;
-    if(e.target.closest('.pname')){ S.props.has(p)?S.props.delete(p):S.props.add(p);
-      if(!S.props.size) DB.props.forEach(x=>S.props.add(x)); render(); }
-    else { drill=p; render(); }});
+    if(e.target.closest('[data-toggle]')) return;
+    drill=tr.dataset.p; render();
+  });
 }
 
 function renderSpecials(units){
