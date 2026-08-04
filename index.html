@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Market Tearsheet — Buchanan Street Partners</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="assets/logo-black.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="css/app.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+</head>
+<body>
+<div class="sheet">
+  <div class="mast">
+    <div class="lh">
+      <img id="logo" src="assets/logo-white.png" alt="Buchanan Street Partners, L.P.">
+      <span class="t">Market Tearsheet</span>
+      <div class="r">
+        <div class="f"><div class="k">Subject property</div>
+          <div class="subjwrap"><select class="subjsel" id="selSubject"></select>
+            <button class="gear" id="btnManage" title="Manage saved surveys">&#9881;</button></div>
+          <div class="saveflag" id="saveFlag"></div></div>
+        <div class="f"><div class="k">Market</div><div class="v" id="mkt"></div></div>
+        <div class="f"><div class="k">Data as of</div><div class="v" id="asof"></div></div>
+        <button class="upload" id="btnUp">Load export</button>
+        <input type="file" id="file" accept=".xlsx,.xls" hidden>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="fg"><label>Window</label><div class="seg" id="segWin">
+      <button data-v="7">7d</button><button data-v="30">30d</button><button data-v="90">90d</button><button data-v="all">All</button></div></div>
+    <div class="fg"><label>Units</label><div class="seg" id="segStatus">
+      <button data-v="avail">On market</button><button data-v="new">Newly listed</button><button data-v="leased">Leased</button><button data-v="all">Both</button></div></div>
+    <div class="fg"><label>View</label><div class="seg" id="segMode">
+      <button data-v="property">Property</button><button data-v="floorplan">Floor plan</button></div></div>
+    <div class="fg"><label>Beds</label><select id="selBeds"></select></div>
+    <div class="fg" id="fpWrap" hidden><label>Plan</label><select id="selFp"></select></div>
+    <div class="fg"><label>X</label><select id="selX">
+      <option value="sqft">Square feet</option><option value="dom">Days on market</option><option value="date">Date listed</option></select></div>
+    <div class="fg"><label>Y</label><select id="selY">
+      <option value="eff">Effective rent</option><option value="ask">Asking rent</option>
+      <option value="epsf">Effective PSF</option><option value="apsf">Asking PSF</option></select></div>
+    <div class="fg"><label>Trend</label><div class="seg" id="segTrend">
+      <button data-v="both">Both</button><button data-v="subject">Subject</button><button data-v="comps">Comps</button><button data-v="none">None</button></div></div>
+    <span id="winHint"></span>
+  </div>
+
+  <div class="ribbon" id="band"></div>
+
+  <div class="grid">
+    <div class="g8 blk">
+      <div class="bh"><h2 id="exTitle">Unit scatter</h2><span class="x" id="plotCount"></span></div>
+      <div class="chartwrap"><div id="chart"></div></div>
+      <div class="cap"><div class="legend" id="legend"></div><div id="caption"></div></div>
+    </div>
+    <div class="g4 blk stack">
+      <div class="bh"><h2>Observations</h2><button class="mini" id="rerun">Refresh</button></div>
+      <div id="ai"></div><div class="aiNote" id="aiNote"></div>
+      <div class="bh maph"><h2>Location</h2><span class="x" id="mapNote"></span></div>
+      <div class="mapwrap"><div id="map"></div><div class="mapmsg" id="mapMsg"></div></div>
+    </div>
+
+    <div class="g7 blk">
+      <div class="bh"><h2 id="tblTitle">Competitive set</h2><span class="x" id="tblAction"></span></div>
+      <div class="tscroll"><table id="tbl"></table></div>
+    </div>
+    <div class="g5 blk">
+      <div class="bh"><h2>Concessions &amp; specials</h2><span class="x" id="specCount"></span></div>
+      <div class="tscroll"><table id="specTbl"></table></div>
+    </div>
+    <div class="g12"><div class="foot" id="foot"></div></div>
+  </div>
+</div>
+<div class="drop" id="drop">Drop an ApartmentIQ export</div>
+<div class="modal" id="modal"><div class="mcard">
+  <div class="mh"><h3>Saved market surveys</h3><button id="mClose">&times;</button></div>
+  <div id="mList"></div>
+  <div class="mfoot" id="mFoot"></div>
+</div></div>
+<script src="js/storage.js" defer></script>
+<script src="js/core.js" defer></script>
+<script src="js/app.js" defer></script>
+</body>
+</html>
