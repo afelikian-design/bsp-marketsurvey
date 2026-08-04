@@ -130,9 +130,19 @@ select{background:var(--paper);border:1px solid var(--rule);padding:3px 7px;font
 .mapmsg input:focus{outline:0;border-color:var(--navy)}
 .mapmsg .err{font:400 11px var(--sans);color:var(--neg);margin-top:7px}
 .pin-sub{color:var(--gold);font-size:23px;line-height:1;text-shadow:0 0 3px #fff,0 0 6px #fff;cursor:pointer}
-.pin-cmp{width:11px;height:11px;border-radius:50%;background:var(--comp);border:1.5px solid #fff;
-  box-shadow:0 1px 3px rgba(14,36,57,.4);cursor:pointer}
-.pin-cmp.dim{opacity:.35}
+.pin-cmp{width:12px;height:12px;border-radius:50%;background:var(--comp);border:1.5px solid #fff;
+  box-shadow:0 1px 3px rgba(14,36,57,.45);cursor:pointer;transition:opacity .15s,transform .15s}
+.pin-cmp.dim{opacity:.3}
+.pin-cmp.fade{opacity:.18}
+.pin-sub{transition:transform .15s}
+.pin-sub:hover{transform:scale(1.15)}
+
+/* colour identity chip, shared by both tables */
+.chip{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:8px;
+  vertical-align:baseline;box-shadow:0 0 0 1px rgba(14,36,57,.14)}
+tr.subj .chip{border-radius:0;clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);
+  width:11px;height:11px;box-shadow:none;margin-right:6px}
+#tbl tbody tr:hover td,#specTbl tbody tr:hover td{background:#EEF3F8}
 .leaflet-popup-content-wrapper{border-radius:2px;box-shadow:0 10px 28px rgba(14,36,57,.28)}
 .leaflet-popup-content{margin:10px 13px;font:400 12.5px/1.5 var(--sans)}
 .pop-n{font:500 15px var(--serif);color:var(--navy);display:block;margin-bottom:3px}
@@ -144,8 +154,11 @@ select{background:var(--paper);border:1px solid var(--rule);padding:3px 7px;font
   font:500 8.5px var(--sans);letter-spacing:.12em;text-transform:uppercase;cursor:pointer;color:var(--dim);width:100%}
 .pop-b:hover{border-color:var(--navy);color:var(--navy)}
 
-/* chart */
-.chartwrap{height:392px;position:relative;padding:10px 2px 0}
+/* chart — fills the grid row rather than sitting at a fixed height, so the
+   left column never trails whitespace under a taller right column */
+.g8.blk{display:flex;flex-direction:column}
+.g8.blk .tscroll{flex:1;min-height:0}
+.chartwrap{flex:1;min-height:392px;position:relative;padding:10px 2px 0}
 #chart{width:100%;height:100%;position:relative}
 .tip{position:absolute;pointer-events:none;background:var(--navy);color:#EAF0F6;padding:8px 11px;
   font:400 11.5px/1.5 var(--sans);z-index:9;box-shadow:0 10px 28px rgba(14,36,57,.3);max-width:210px}
@@ -229,6 +242,8 @@ tr.subj td:first-child{box-shadow:inset 3px 0 0 var(--gold)}
     <div class="fg"><label>Y</label><select id="selY">
       <option value="eff">Effective rent</option><option value="ask">Asking rent</option>
       <option value="epsf">Effective PSF</option><option value="apsf">Asking PSF</option></select></div>
+    <div class="fg"><label>Colour</label><div class="seg" id="segColor">
+      <button data-v="subject">Subject</button><button data-v="property">By property</button></div></div>
     <div class="fg"><label>Trend</label><div class="seg" id="segTrend">
       <button data-v="both">Both</button><button data-v="subject">Subject</button><button data-v="comps">Comps</button><button data-v="none">None</button></div></div>
     <span id="winHint"></span>
@@ -383,7 +398,8 @@ const STATUS = ['Available','Applied','Leased'];
 const DB = { props:[], fps:[], units:[], meta:{}, subject:null, asof:null, market:'', src:'' };
 const S = {           // UI state
   win: 30, mode:'property', status:'avail', beds:'all',
-  x:'sqft', y:'ask', trend:'both', props:new Set(), fp:'all'
+  x:'sqft', y:'ask', trend:'both', props:new Set(), fp:'all',
+  color:'subject', focus:null
 };
 
 /* ---------- load embedded payload ---------- */
@@ -592,9 +608,34 @@ function drawScatter(el, theme){
 
   const W=el.clientWidth||900, H=el.clientHeight||460;
   const M={t:16,r:18,b:44,l:64};
-  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
-  let x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
-  const padx=(x1-x0)*.06||1, pady=(y1-y0)*.10||1;
+
+  /* A single 520 sf unit or one $4,000 penthouse used to stretch an axis across
+     empty space and squash the real cluster into a corner. Bound each axis by
+     Tukey fences instead of raw extremes, but never clip the subject: its units
+     always stay in frame, since the whole point is reading it against the set. */
+  const fence=(vals, keepLo, keepHi)=>{
+    const s=[...vals].sort((a,b)=>a-b);
+    if(s.length<4) return [s[0], s[s.length-1]];
+    const q=t=>{ const i=(s.length-1)*t, lo=Math.floor(i), hi=Math.ceil(i);
+                 return s[lo]+(s[hi]-s[lo])*(i-lo); };
+    const q1=q(.25), q3=q(.75), iqr=q3-q1;
+    // whichever is tighter: Tukey fences or the 1st/99th percentile. Fences
+    // catch true outliers; the percentile trims a long thin tail that fences
+    // tolerate but that still pushes the cluster off-centre.
+    let lo=Math.max(q1-1.5*iqr, q(.01), s[0]);
+    let hi=Math.min(q3+1.5*iqr, q(.99), s[s.length-1]);
+    if(keepLo!=null) lo=Math.min(lo, keepLo);
+    if(keepHi!=null) hi=Math.max(hi, keepHi);
+    if(!(hi>lo)){ lo=s[0]; hi=s[s.length-1]; }
+    return [lo,hi];
+  };
+  const subP=pts.filter(p=>p.u.prop===DB.subject);
+  const sx=subP.map(p=>p.x), sy=subP.map(p=>p.y);
+  let [x0,x1]=fence(pts.map(p=>p.x), sx.length?Math.min(...sx):null, sx.length?Math.max(...sx):null);
+  let [y0,y1]=fence(pts.map(p=>p.y), sy.length?Math.min(...sy):null, sy.length?Math.max(...sy):null);
+  const inRange=p=>p.x>=x0&&p.x<=x1&&p.y>=y0&&p.y<=y1;
+  const shown=pts.filter(inRange), hidden=pts.length-shown.length;
+  const padx=(x1-x0)*.04||1, pady=(y1-y0)*.06||1;
   x0-=padx; x1+=padx; y0-=pady; y1+=pady;
   const X=v=>M.l+(v-x0)/(x1-x0)*(W-M.l-M.r);
   const Y=v=>H-M.b-(v-y0)/(y1-y0)*(H-M.t-M.b);
@@ -628,28 +669,34 @@ function drawScatter(el, theme){
       'stroke-dasharray':dash||'','stroke-linecap':'round',opacity:.9});
     return f;
   };
-  const subPts=pts.filter(p=>p.u.prop===DB.subject), cmpPts=pts.filter(p=>p.u.prop!==DB.subject);
+  const subPts=shown.filter(p=>p.u.prop===DB.subject), cmpPts=shown.filter(p=>p.u.prop!==DB.subject);
   let fitC=null, fitS=null;
   if(S.mode==='property'){
     if(S.trend!=='subject') fitC=line(cmpPts,theme.comp,'6 5');
     if(S.trend!=='comps')   fitS=line(subPts,theme.subject);
   } else {
-    if(S.trend!=='none') fitS=line(pts,theme.subject);
+    if(S.trend!=='none') fitS=line(shown,theme.subject);
   }
 
   // dots
   const fpColors={}; let ci=0;
-  if(S.mode==='floorplan') [...new Set(pts.map(p=>p.u.fp))].forEach(f=>fpColors[f]=theme.palette[ci++%theme.palette.length]);
+  if(S.mode==='floorplan') [...new Set(shown.map(p=>p.u.fp))].forEach(f=>fpColors[f]=theme.palette[ci++%theme.palette.length]);
   const tip=el.querySelector('.tip')||Object.assign(document.createElement('div'),{className:'tip'});
   tip.style.display='none'; el.appendChild(tip);
 
   const order=[...cmpPts,...subPts];       // subject drawn last, on top
-  for(const p of order){
+  const ordered = S.focus ? [...order.filter(p=>p.u.prop!==S.focus), ...order.filter(p=>p.u.prop===S.focus)] : order;
+  for(const p of ordered){
     const isSub = p.u.prop===DB.subject;
-    const fill = S.mode==='floorplan' ? fpColors[p.u.fp] : (isSub?theme.subject:theme.comp);
-    const c=add('circle',{cx:X(p.x),cy:Y(p.y),r:isSub&&S.mode==='property'?5.5:4,
-      fill, opacity:isSub||S.mode==='floorplan'?.95:(theme.compOpacity??.42),
-      stroke:isSub&&S.mode==='property'?theme.subjectRing:'none','stroke-width':1.5});
+    const isFoc = S.focus && p.u.prop===S.focus;
+    const fill = S.mode==='floorplan' ? fpColors[p.u.fp]
+      : (theme.colorFor ? theme.colorFor(p.u.prop) : (isSub?theme.subject:theme.comp));
+    let op = isSub||S.mode==='floorplan' ? .95 : (theme.compOpacity??.42);
+    if(S.focus) op = isFoc ? 1 : .10;          // dim everything but the hovered property
+    const r0 = isFoc ? 6 : (isSub&&S.mode==='property'?5.5:4);
+    const c=add('circle',{cx:X(p.x),cy:Y(p.y),r:r0,
+      fill, opacity:op,
+      stroke:(isSub&&S.mode==='property')||isFoc?theme.subjectRing:'none','stroke-width':1.5});
     c.style.cursor='crosshair';
     c.addEventListener('mouseenter',ev=>{
       c.setAttribute('r',7);
@@ -662,10 +709,10 @@ function drawScatter(el, theme){
       tip.style.left=Math.min(X(p.x)+14, r.width-210)+'px';
       tip.style.top=Math.max(Y(p.y)-10,4)+'px';
     });
-    c.addEventListener('mouseleave',()=>{ c.setAttribute('r',isSub&&S.mode==='property'?5.5:4); tip.style.display='none'; });
+    c.addEventListener('mouseleave',()=>{ c.setAttribute('r',r0); tip.style.display='none'; });
   }
   el.insertBefore(svg, tip);
-  return {fitC, fitS, n:pts.length, nSub:subPts.length};
+  return {fitC, fitS, n:shown.length, nSub:subPts.length, hidden};
 }
 
 /* Concession economics per property. AIQ gives concession as a % of annual
@@ -755,7 +802,8 @@ const F = {
   pct:v=>v==null?'—':(v*100).toFixed(1)+'%',
   p1:v=>v==null?'—':v.toFixed(1)+'%',
   n:v=>v==null?'—':Math.round(v).toLocaleString(),
-  d:v=>v==null?'—':Math.round(v)
+  d:v=>v==null?'—':Math.round(v),
+  mi:v=>v==null?'—':(+v).toFixed(1)
 };
 function delta(a,c){ if(a==null||c==null||!c) return null; return (a-c)/c*100; }
 
@@ -774,7 +822,7 @@ function seg(id,key,after){ const el=$(id);
     [...el.children].forEach(x=>x.setAttribute('aria-pressed',x===b)); after&&after(); render();});
   [...el.children].forEach(x=>x.setAttribute('aria-pressed',String(S[key])===x.dataset.v));
 }
-seg('#segWin','win'); seg('#segStatus','status'); seg('#segTrend','trend');
+seg('#segWin','win'); seg('#segStatus','status'); seg('#segTrend','trend'); seg('#segColor','color');
 seg('#segMode','mode',()=>{ $('#fpWrap').hidden=S.mode!=='floorplan'; if(S.mode!=='floorplan') S.fp='all'; drill=null; });
 $('#selX').onchange=e=>{S.x=e.target.value;render()};
 $('#selY').onchange=e=>{S.y=e.target.value;render()};
@@ -800,9 +848,17 @@ function render(){
   const sub=st[DB.subject], comps=Object.entries(st).filter(([p])=>p!==DB.subject).map(([,v])=>v);
   const cavg=k=>{const a=comps.map(c=>c[k]).filter(v=>v!=null); return a.length?a.reduce((x,y)=>x+y,0)/a.length:null;};
 
-  const met=(k,v,d,inv)=>{const cls=d==null?'flat':(inv?(d<0?'up':'down'):(d>0?'up':'down'));
+  /* Green means favourable to the owner, which is not always "up": a deeper
+     concession or a longer lease-up is worse even though the number is higher.
+     Metrics flagged `inv` invert, and the title says so on hover. */
+  const met=(k,v,d,inv)=>{
+    const cls = d==null ? 'flat' : (inv ? (d<0?'up':'down') : (d>0?'up':'down'));
+    const arrow = d==null ? '' : (d>0?'▲ ':'▼ ');
+    const why = d==null ? '' :
+      (cls==='up' ? 'Favourable vs. the comp average' : 'Unfavourable vs. the comp average')
+      + (inv ? ' (lower is better for this metric)' : '');
     return `<div class="met"><div class="k">${k}</div><div class="v">${v}</div>
-      <div class="d ${cls}">${d==null?'—':(d>0?'+':'')+d.toFixed(1)+'% vs comps'}</div></div>`;};
+      <div class="d ${cls}" title="${why}">${d==null?'—':arrow+(d>0?'+':'')+d.toFixed(1)+'% vs comps'}</div></div>`;};
   $('#band').innerHTML = sub ? [
     met('Effective rent',F.$(sub.eff),delta(sub.eff,cavg('eff'))),
     met('Effective PSF',F.psf(sub.epsf),delta(sub.epsf,cavg('epsf'))),
@@ -814,22 +870,27 @@ function render(){
 
   $('#exTitle').textContent=`${AX[S.y].label} × ${AX[S.x].label.toLowerCase()}`;
   const r=drawScatter($('#chart'),TH);
-  $('#plotCount').textContent=r?`${r.n} units · ${r.nSub} subject`:'';
+  $('#plotCount').textContent = r
+    ? `${r.n} units · ${r.nSub} subject${r.hidden?` · ${r.hidden} outside range`:''}` : '';
   $('#legend').innerHTML = S.mode==='floorplan'
     ? `<span><span class="dot" style="background:${TH.subject}"></span>${DB.subject} floor plans</span>`
-    : `<span><span class="dot" style="background:${TH.subject};box-shadow:0 0 0 2px ${TH.subjectRing}"></span>${DB.subject}</span>
+    : S.color==='property'
+      ? `<span><span class="dot" style="background:${SUBJ_COLOR};box-shadow:0 0 0 2px ${TH.subjectRing}"></span>${DB.subject}</span>
+         <span>Comps coloured to match the table and map · hover a row to isolate</span>`
+      : `<span><span class="dot" style="background:${TH.subject};box-shadow:0 0 0 2px ${TH.subjectRing}"></span>${DB.subject}</span>
        <span><span class="dot" style="background:${TH.comp}"></span>Comp set</span>
        <span><span class="sw" style="background:${TH.subject}"></span>Subject fit</span>
        <span><span class="sw" style="height:0;border-top:2px dashed ${TH.comp}"></span>Comp fit</span>`;
   if(r){
     const unit=S.x==='sqft'?'per sq. ft.':'per day';
-    const sl=f=>f?`${AX[S.y].fmt(Math.abs(f.m))} ${unit} (R² ${f.r2.toFixed(2)}, n=${f.n})`:'—';
+    const sl=f=>f?`${slopeFmt(f.m)} ${unit} (R² ${f.r2.toFixed(2)}, n=${f.n})`:'—';
+    const outl = r.hidden ? ` ${r.hidden} outlier${r.hidden===1?'':'s'} fall outside the plotted range and are excluded from the fits.` : '';
     let c=`${S.status==='avail'?'Units presently on the market':S.status==='new'?'Units newly listed in the window':S.status==='leased'?'Units leased within the window':'All units'}${S.beds!=='all'?`, ${S.beds==='0'?'studios':S.beds+'-bedroom only'}`:''}. `;
     if(r.fitS&&r.fitC&&S.mode==='property'){
       const gap=r.fitS.m-r.fitC.m;
       c+=`Subject fit ${sl(r.fitS)} vs. ${sl(r.fitC)} for the set — ${gap>=0?'steeper':'flatter'}.`;
     } else if(r.fitS) c+=`Fitted slope ${sl(r.fitS)}.`;
-    $('#caption').textContent=c;
+    $('#caption').textContent=c+outl;
   } else $('#caption').textContent='';
 
   renderTable(units,st); renderSpecials(units);
@@ -869,9 +930,13 @@ function renderTable(units,st){
     <th>Eff.</th><th>PSF</th><th>Conc.</th><th>Expo.</th><th>Days</th></tr></thead><tbody>`+
     Object.entries(st).sort((a,b)=>b[1].epsf-a[1].epsf).map(([p,v])=>
     `<tr class="clik ${p===DB.subject?'subj':''} ${S.props.has(p)?'':'off'}" data-p="${p}">
-      <td><span class="pname">${p}</span><span class="chev">›</span></td><td>${v.dist??'—'}</td><td>${v.yr||'—'}</td>
+      <td>${chip(p)}<span class="pname">${p}</span><span class="chev">›</span></td><td>${F.mi(v.dist)}</td><td>${v.yr||'—'}</td>
       <td>${v.tot||'—'}</td><td>${v.n}</td><td>${F.$(v.ask)}</td><td>${F.$(v.eff)}</td><td>${F.psf(v.epsf)}</td>
       <td>${F.pct(v.conc)}</td><td>${F.pct(v.exp)}</td><td>${F.d(v.dom)}</td></tr>`).join('')+'</tbody>';
+  T.querySelectorAll('tbody tr.clik').forEach(tr=>{
+    tr.onmouseenter=()=>setFocus(tr.dataset.p);
+    tr.onmouseleave=()=>setFocus(null);
+  });
   T.querySelectorAll('tbody tr.clik').forEach(tr=>tr.onclick=e=>{
     const p=tr.dataset.p;
     if(e.target.closest('.pname')){ S.props.has(p)?S.props.delete(p):S.props.add(p);
@@ -885,13 +950,17 @@ function renderSpecials(units){
   $('#specTbl').innerHTML=`<thead><tr><th>Property</th><th>Rate</th><th>Wks</th><th>Spread/mo</th><th>Annual</th><th>Advertised offer</th></tr></thead><tbody>`+
     (board.length?board.map(b=>{
       const live=b.gapMo!=null&&b.gapMo>=1, stale=!live&&(b.conc||0)>0.02;
-      return `<tr class="${b.isSubject?'subj':''}"><td><span class="pname">${b.prop}</span></td>
+      return `<tr class="${b.isSubject?'subj':''}" data-p="${b.prop}"><td>${chip(b.prop)}<span class="pname">${b.prop}</span></td>
         <td>${b.conc!=null?(b.conc*100).toFixed(1)+'%':'—'}</td><td>${b.weeks!=null?b.weeks.toFixed(1):'—'}</td>
         <td class="${stale?'warn':''}">${live?F.$(b.gapMo):stale?'Not listed':'—'}</td>
         <td>${live?F.$(b.annual):'—'}</td>
         <td class="offer"><div class="clamp">${b.offer||'<span class="muted">None</span>'}</div><div class="more"></div></td></tr>`;}).join('')
      :'<tr><td colspan="6" class="muted" style="text-align:center;padding:22px">No properties in filter.</td></tr>')+'</tbody>';
   markTruncated();
+  document.querySelectorAll('#specTbl tbody tr[data-p]').forEach(tr=>{
+    tr.onmouseenter=()=>setFocus(tr.dataset.p);
+    tr.onmouseleave=()=>setFocus(null);
+  });
 }
 
 /* Rows are a fixed height with the offer clamped to two lines. Only cells whose
@@ -918,6 +987,56 @@ function refreshAI(){
     m=>{ $('#aiNote').textContent=m; });
 }
 $('#rerun').onclick=refreshAI;
+
+/* ================= property colour identity =================
+   Gold is reserved for the subject everywhere — table chip, chart dot, map star
+   — so "ours" reads instantly. Comps draw from a fixed ramp by sorted position,
+   which keeps a property the same colour across the chart, map and both tables
+   for a given survey. Colours are muted on purpose: with thirteen properties a
+   saturated ramp turns the scatter into confetti. */
+const SUBJ_COLOR='#9C7C33';
+const COMP_RAMP=['#1F5C8B','#2E7D5B','#A6453E','#5E5A9E','#C77C2E','#2B8A8A',
+                 '#B0507E','#7A8C2E','#8A6BA8','#4A6E92','#6D6E71','#8C5A2B'];
+function propColor(p){
+  if(p===DB.subject) return SUBJ_COLOR;
+  const i=DB.props.filter(x=>x!==DB.subject).indexOf(p);
+  return i<0 ? '#8D9EB0' : COMP_RAMP[i%COMP_RAMP.length];
+}
+const chip = p => `<span class="chip" style="background:${propColor(p)}"></span>`;
+
+/* A regression slope needs cents — the axis formatter rounds rent to whole
+   dollars, which rendered "$1/sf vs $1/sf" for 1.04 against 1.31. */
+const slopeFmt = m => { const a=Math.abs(m);
+  return (S.y==='epsf'||S.y==='apsf') ? '$'+a.toFixed(3) : a<10 ? '$'+a.toFixed(2) : '$'+a.toFixed(1); };
+
+/* Hovering a row lights that property up in the chart and on the map. Only the
+   two visuals redraw — a full render() on every mouseover would be wasteful. */
+let focusTimer=null;
+function setFocus(p){
+  if(S.focus===p) return;
+  S.focus=p;
+  clearTimeout(focusTimer);
+  focusTimer=setTimeout(()=>{ drawScatter($('#chart'),TH); drawMap(); },30);
+}
+
+/* The chart is sized by the grid row, which changes when observations load or
+   the map appears. Redraw on real size changes only — the observer watches the
+   wrapper, never #chart, so re-rendering the SVG cannot retrigger it. */
+let lastChartBox = '';
+function watchChart(){
+  const wrap = document.querySelector('.chartwrap');
+  if(!wrap || !window.ResizeObserver) return;
+  let queued = false;
+  new ResizeObserver(entries => {
+    const r = entries[0].contentRect;
+    const box = Math.round(r.width) + 'x' + Math.round(r.height);
+    if(box === lastChartBox || r.height < 40) return;
+    lastChartBox = box;
+    if(queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; drawScatter($('#chart'), TH); });
+  }).observe(wrap);
+}
 
 /* ================= location map ================= */
 let MAP=null, MAPLAYER=null, MAPKEY=null;
@@ -1024,13 +1143,13 @@ function drawMap(){
     const isSub = pt.prop===DB.subject;
     const on = S.props.has(pt.prop);
     const icon = isSub
-      ? L.divIcon({className:'', html:'<div class="pin-sub">&#9733;</div>', iconSize:[23,23], iconAnchor:[11,11]})
-      : L.divIcon({className:'', html:`<div class="pin-cmp${on?'':' dim'}"></div>`, iconSize:[11,11], iconAnchor:[6,6]});
+      ? L.divIcon({className:'', html:'<div class="pin-sub" title="Subject property">&#9733;</div>', iconSize:[27,27], iconAnchor:[13,13]})
+      : L.divIcon({className:'', html:`<div class="pin-cmp${on?'':' dim'}${S.focus&&S.focus!==pt.prop?' fade':''}" style="background:${propColor(pt.prop)}"></div>`, iconSize:[12,12], iconAnchor:[6,6]});
     const v=st[pt.prop]||{};
     const row=(k,val)=>`<div class="pop-r"><span>${k}</span><span>${val}</span></div>`;
     const m=L.marker([pt.lat,pt.lng],{icon, zIndexOffset:isSub?1000:0}).addTo(MAPLAYER);
     m.bindPopup(`<span class="pop-n ${isSub?'sub':''}">${pt.prop}</span>
-      <span class="pop-a">${pt.addr}${v.dist!=null?' · '+v.dist+' mi':''}${v.yr?' · built '+v.yr:''}</span>
+      <span class="pop-a">${isSub?'★ Subject · ':''}${pt.addr}${v.dist!=null?' · '+F.mi(v.dist)+' mi':''}${v.yr?' · built '+v.yr:''}</span>
       ${row('Effective', F.$(v.eff))}${row('Eff. PSF', F.psf(v.epsf))}
       ${row('Concession', F.pct(v.conc))}${row('Listed', v.n??'—')}
       <button class="pop-b" data-drill="${encodeURIComponent(pt.prop)}">Unit detail</button>`);
@@ -1147,6 +1266,7 @@ function ingest(file){
 addEventListener('keydown',e=>{ if(e.key==='Escape'){ if(modal.classList.contains('on')) modal.classList.remove('on');
   else if(drill){drill=null;render();} } });
 addEventListener('resize',()=>render());
+watchChart();
 
 /* boot: render the sample instantly, then restore the last survey if one exists */
 let PAYLOAD=null;
