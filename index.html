@@ -399,7 +399,7 @@ const DB = { props:[], fps:[], units:[], meta:{}, subject:null, asof:null, marke
 const S = {           // UI state
   win: 30, mode:'property', status:'avail', beds:'all',
   x:'sqft', y:'ask', trend:'both', props:new Set(), fp:'all',
-  color:'subject', focus:null
+  color:'property', focus:null
 };
 
 /* ---------- load embedded payload ---------- */
@@ -810,7 +810,8 @@ function delta(a,c){ if(a==null||c==null||!c) return null; return (a-c)/c*100; }
 </script>
 <script>
 const TH={grid:'#E2E7ED',dim:'#71808F',mono:"'Inter',sans-serif",subject:'#0E2439',
-  subjectRing:'#C4A45E',comp:'#8D9EB0',compOpacity:.7,
+  subjectRing:'#C4A45E',comp:'#8D9EB0',compOpacity:.85,
+  colorFor:p=>S.color==='property'?propColor(p):(p===DB.subject?'#0E2439':'#8D9EB0'),
   palette:['#0E2439','#9C7C33','#4A6E92','#1B6B4F','#9C3328','#71808F','#5B7C99','#7A6A9C']};
 const $=s=>document.querySelector(s);
 let drill=null;
@@ -928,7 +929,8 @@ function renderTable(units,st){
   A.textContent='Row for units · name to exclude';
   T.innerHTML=`<thead><tr><th>Property</th><th>Mi</th><th>Built</th><th>Units</th><th>Listed</th><th>Ask</th>
     <th>Eff.</th><th>PSF</th><th>Conc.</th><th>Expo.</th><th>Days</th></tr></thead><tbody>`+
-    Object.entries(st).sort((a,b)=>b[1].epsf-a[1].epsf).map(([p,v])=>
+    Object.entries(st).sort((a,b)=>
+      (a[0]===DB.subject?-1:b[0]===DB.subject?1:0) || (b[1].epsf-a[1].epsf)).map(([p,v])=>
     `<tr class="clik ${p===DB.subject?'subj':''} ${S.props.has(p)?'':'off'}" data-p="${p}">
       <td>${chip(p)}<span class="pname">${p}</span><span class="chev">›</span></td><td>${F.mi(v.dist)}</td><td>${v.yr||'—'}</td>
       <td>${v.tot||'—'}</td><td>${v.n}</td><td>${F.$(v.ask)}</td><td>${F.$(v.eff)}</td><td>${F.psf(v.epsf)}</td>
