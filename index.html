@@ -83,7 +83,8 @@ select.subjsel option{background:var(--navy);color:#fff;font-size:13px}
 .seg button{background:var(--paper);border:0;padding:3px 10px;font:500 10.5px var(--sans);color:var(--dim);cursor:pointer;white-space:nowrap}
 .seg button+button{border-left:1px solid var(--rule)}
 .seg button[aria-pressed=true]{background:var(--navy);color:#fff}
-select{background:var(--paper);border:1px solid var(--rule);padding:3px 7px;font:500 10.5px var(--sans);cursor:pointer}
+select{background:var(--paper);border:1px solid var(--rule);padding:3px 7px;font:500 10.5px var(--sans);
+  cursor:pointer;min-width:104px;max-width:190px}
 #winHint{font:400 10.5px var(--sans);color:var(--dim);max-width:330px;line-height:1.4}
 
 /* grid */
@@ -211,8 +212,8 @@ tr.subj td:first-child{box-shadow:inset 3px 0 0 var(--gold)}
 .drop.on{display:grid}
 
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="sheet">
@@ -240,7 +241,7 @@ tr.subj td:first-child{box-shadow:inset 3px 0 0 var(--gold)}
       <button data-v="avail">On market</button><button data-v="new">Newly listed</button><button data-v="leased">Leased</button><button data-v="all">Both</button></div></div>
     <div class="fg"><label>View</label><div class="seg" id="segMode">
       <button data-v="property">Property</button><button data-v="floorplan">Floor plan</button></div></div>
-    <div class="fg"><label>Beds</label><select id="selBeds"></select></div>
+    <div class="fg"><label>Beds</label><div class="seg" id="segBeds"></div></div>
     <div class="fg" id="fpWrap" hidden><label>Plan</label><select id="selFp"></select></div>
     <div class="fg"><label>X</label><select id="selX">
       <option value="sqft">Square feet</option><option value="dom">Days on market</option><option value="date">Date listed</option></select></div>
@@ -845,7 +846,25 @@ seg('#segWin','win'); seg('#segStatus','status'); seg('#segTrend','trend'); seg(
 seg('#segMode','mode',()=>{ $('#fpWrap').hidden=S.mode!=='floorplan'; if(S.mode!=='floorplan') S.fp='all'; drill=null; });
 $('#selX').onchange=e=>{S.x=e.target.value;render()};
 $('#selY').onchange=e=>{S.y=e.target.value;render()};
-$('#selBeds').onchange=e=>{S.beds=e.target.value;render()};
+/* Bed counts are a visible segmented control rather than a dropdown: a
+   collapsed <select> shows only the current pick, so the other options look
+   like they don't exist. Built from the survey, since not every property has
+   studios or threes. */
+function paintBeds(){
+  const tally={};
+  for(const u of DB.units){ if(u.beds==null) continue; tally[u.beds]=(tally[u.beds]||0)+1; }
+  const beds=Object.keys(tally).map(Number).sort((a,b)=>a-b);
+  const el=$('#segBeds');
+  el.innerHTML='<button data-v="all" title="'+DB.units.length.toLocaleString()+' units">All</button>'+
+    beds.map(b=>`<button data-v="${b}" title="${tally[b].toLocaleString()} units in this survey">${b===0?'Studio':b+' bd'}</button>`).join('');
+  [...el.children].forEach(x=>x.setAttribute('aria-pressed', String(S.beds)===x.dataset.v));
+}
+$('#segBeds').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  S.beds=b.dataset.v;
+  [...e.currentTarget.children].forEach(x=>x.setAttribute('aria-pressed', x===b));
+  render();
+});
 $('#selFp').onchange=e=>{S.fp=e.target.value;render()};
 
 function boot(){
@@ -853,8 +872,7 @@ function boot(){
   const m=DB.meta[DB.subject]||{};
   $('#mkt').textContent=DB.market||'—';
   $('#asof').textContent=new Date(DB.asof+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
-  const beds=[...new Set(DB.units.map(u=>u.beds))].filter(v=>v!=null).sort((a,b)=>a-b);
-  $('#selBeds').innerHTML='<option value="all">All</option>'+beds.map(b=>`<option value="${b}">${b===0?'Studio':b+' bd'}</option>`).join('');
+  paintBeds();
   const fps=[...new Set(DB.units.filter(u=>u.prop===DB.subject).map(u=>u.fp))].sort();
   $('#selFp').innerHTML='<option value="all">All plans</option>'+fps.map(f=>`<option value="${f}">${f}</option>`).join('');
   $('#foot').textContent=`Subject: ${DB.subject}${m.yr?', built '+m.yr:''}${m.tot?', '+m.tot+' units':''}. Source: ApartmentIQ unit-level export. Effective rent is net of advertised concessions as reported by ApartmentIQ; concession rate is a trailing thirty-day leasing average and may differ from the spread on current listings. Trend lines are ordinary least squares fits across units plotted. Prepared for internal use.`;
